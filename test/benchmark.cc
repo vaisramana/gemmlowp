@@ -55,6 +55,8 @@ namespace gemmlowp {
 const double min_accurate_duration = 1e-1;
 const std::size_t min_working_set_size = 16 * 1024 * 1024;
 
+enum class GemmMethod { MethodGemmlowp, MethodFarm };
+
 struct gemm_t {
   int rows, depth, cols;
   gemm_t() : rows(0), depth(0), cols(0) {}
@@ -68,7 +70,7 @@ bool operator<(const gemm_t& a, const gemm_t& b) {
 }
 
 template <typename LhsType, typename RhsType, typename ResultType>
-double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms) {
+double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms, GemmMethod method) {
   typedef std::uint8_t Scalar;
 
   // set up the matrix pool
@@ -80,6 +82,7 @@ double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms) {
     int cols = gemm.cols;
     combined_gemm_sizes +=
         sizeof(Scalar) * (rows * depth + depth * cols + rows * cols);
+    //std::cout << "input gemms " << rows << "x" << depth << "x" << cols << std::endl;
   }
 
   const std::size_t pool_size = 1 + min_working_set_size / combined_gemm_sizes;
@@ -97,6 +100,12 @@ double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms) {
       MakeConstant(&rhs[k], 0);
       result[k].Resize(gemms[j].rows, gemms[j].cols);
       MakeConstant(&result[k], 0);
+      /*
+      std::cout << "prepare k " << k << " i " << i << " j " << j 
+                << " lhs " << lhs[k].rows() << "x" << lhs[k].cols()
+                << " rhs " << rhs[k].rows() << "x" << rhs[k].cols()
+                << std::endl;
+      */
     }
   }
 
@@ -111,9 +120,24 @@ double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms) {
     for (int i = 0; i < iters_at_a_time; i++) {
       for (size_t j = 0; j < gemms.size(); j++) {
         size_t k = pool_index * gemms.size() + j;
-        Gemm<std::uint8_t, GEMMLOWP_TEST_BIT_DEPTH_PARAMS>(
-            context, lhs[k].const_map(), rhs[k].const_map(), &result[k].map(),
-            -75, -91, 74980, 123, 20);
+        /*
+        std::cout << "lhs " << lhs[k].rows() << "x" << lhs[k].cols()
+                  << " rhs " << rhs[k].rows() << "x" << rhs[k].cols()
+                  << std::endl;
+        */
+        if (GemmMethod::MethodGemmlowp == method) {
+          Gemm<std::uint8_t, GEMMLOWP_TEST_BIT_DEPTH_PARAMS>(
+              context, lhs[k].const_map(), rhs[k].const_map(), &result[k].map(),
+              -75, -91, 74980, 123, 20);
+        }
+        else if (GemmMethod::MethodFarm == method) {
+          Gemv<std::uint8_t, GEMMLOWP_TEST_BIT_DEPTH_PARAMS>(
+              context, lhs[k].const_map(), rhs[k].const_map(), &result[k].map(),
+              -75, -91, 74980, 123, 20);
+        }
+        else {
+           std::cout << "invalid Gemm method " << std::endl;
+        }
       }
       pool_index++;
       if (pool_index == pool_size) {
@@ -136,35 +160,73 @@ double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms) {
 }
 
 template <typename LhsType, typename RhsType, typename ResultType>
-double gflops_for_gemms(GemmContext* context,
-                        const std::vector<gemm_t>& gemms) {
+std::pair<double, double> gflops_for_gemms(GemmContext* context,
+                        const std::vector<gemm_t>& gemms,
+                        GemmMethod method) {
   const double time_per_iter =
-      time_for_gemms<LhsType, RhsType, ResultType>(context, gemms);
+      time_for_gemms<LhsType, RhsType, ResultType>(context, gemms, method);
   double ops = 0;
   for (auto gemm : gemms) {
     ops += 2.0 * gemm.rows * gemm.depth * gemm.cols;
   }
-  return 1e-9 * ops / time_per_iter;
+  std::pair<double, double> result;
+  result.first = time_per_iter * 1e3;
+  result.second = 1e-9 * ops / time_per_iter;
+  return result;
 }
 
-void benchmark(GemmContext* context) {
-  std::map<gemm_t, std::vector<double>> benchmark_results;
+void benchmark(GemmContext* context, GemmMethod method) {
+  std::map<gemm_t, std::vector<std::pair<double, double> >> benchmark_results;
 
   std::vector<gemm_t> benchmark_gemms;
-  benchmark_gemms.emplace_back(10, 10, 10);
-  benchmark_gemms.emplace_back(20, 20, 20);
-  benchmark_gemms.emplace_back(30, 30, 30);
-  benchmark_gemms.emplace_back(40, 40, 40);
-  benchmark_gemms.emplace_back(50, 50, 50);
-  benchmark_gemms.emplace_back(60, 60, 60);
-  benchmark_gemms.emplace_back(64, 256, 147);
-  benchmark_gemms.emplace_back(100, 100, 1);
-  benchmark_gemms.emplace_back(100, 100, 100);
-  benchmark_gemms.emplace_back(100, 1000, 100);
-  benchmark_gemms.emplace_back(1000, 1000, 1);
-  benchmark_gemms.emplace_back(1000, 1000, 10);
-  benchmark_gemms.emplace_back(1000, 1000, 100);
-  benchmark_gemms.emplace_back(1000, 1000, 1000);
+  /*
+  benchmark_gemms.emplace_back(6144, 1, 320),
+  benchmark_gemms.emplace_back(6144, 2, 320),
+  benchmark_gemms.emplace_back(6144, 3, 320),
+  benchmark_gemms.emplace_back(6144, 4, 320),
+  benchmark_gemms.emplace_back(6144, 5, 320),
+  benchmark_gemms.emplace_back(6144, 6, 320),
+  benchmark_gemms.emplace_back(6144, 7, 320),
+  benchmark_gemms.emplace_back(6144, 8, 320),
+  benchmark_gemms.emplace_back(6144, 9, 320),
+  benchmark_gemms.emplace_back(6144, 10, 320),
+  */
+  benchmark_gemms.emplace_back(1, 6144, 320),
+  benchmark_gemms.emplace_back(2, 6144, 320),
+  benchmark_gemms.emplace_back(3, 6144, 320),
+  benchmark_gemms.emplace_back(4, 6144, 320),
+  benchmark_gemms.emplace_back(5, 6144, 320),
+  benchmark_gemms.emplace_back(6, 6144, 320),
+  benchmark_gemms.emplace_back(7, 6144, 320),
+  benchmark_gemms.emplace_back(8, 6144, 320),
+  benchmark_gemms.emplace_back(9, 6144, 320),
+  benchmark_gemms.emplace_back(10, 6144, 320),
+  benchmark_gemms.emplace_back(1, 128, 128);
+  benchmark_gemms.emplace_back(1, 256, 256);
+  benchmark_gemms.emplace_back(1, 384, 384);
+  benchmark_gemms.emplace_back(1, 512, 512);
+  benchmark_gemms.emplace_back(1, 640, 640);
+  benchmark_gemms.emplace_back(1, 768, 768);
+  benchmark_gemms.emplace_back(1, 896, 896);
+  benchmark_gemms.emplace_back(1, 1024, 1024);
+  benchmark_gemms.emplace_back(1, 2048, 2048);
+  benchmark_gemms.emplace_back(1, 4096, 4096);
+  /*
+  benchmark_gemms.emplace_back(128, 1, 128);
+  benchmark_gemms.emplace_back(256, 1, 256);
+  benchmark_gemms.emplace_back(384, 1, 384);
+  benchmark_gemms.emplace_back(512, 1, 512);
+  benchmark_gemms.emplace_back(640, 1, 640);
+  benchmark_gemms.emplace_back(768, 1, 768);
+  benchmark_gemms.emplace_back(896, 1, 896);
+  benchmark_gemms.emplace_back(1024, 1, 1024);
+  benchmark_gemms.emplace_back(2048, 1, 2048);
+  benchmark_gemms.emplace_back(4096, 1, 4096);
+  */
+  //benchmark_gemms.emplace_back(1000, 1000, 1);
+  //benchmark_gemms.emplace_back(1000, 1000, 10);
+  //benchmark_gemms.emplace_back(1000, 1000, 100);
+  //benchmark_gemms.emplace_back(1000, 1000, 1000);
 
   const int repeat = 2;
 
@@ -182,13 +244,14 @@ void benchmark(GemmContext* context) {
     std::cout << "repetition " << r + 1 << "/" << repeat + 1 << "...\r"
               << std::flush;
     for (auto gemm : benchmark_gemms) {
-      double gflops = 0;
+      //std::cout << "benchmark gemms " << gemm.rows << "x" << gemm.depth << "x" << gemm.cols << std::endl;
+      std::pair<double, double> result;
       std::vector<gemm_t> unique_gemm;
       unique_gemm.push_back(gemm);
-      gflops =
-          gflops_for_gemms<LhsType, RhsType, ResultType>(context, unique_gemm);
+      result =
+          gflops_for_gemms<LhsType, RhsType, ResultType>(context, unique_gemm, method);
       if (r > 0) {
-        benchmark_results[gemm].emplace_back(gflops);
+        benchmark_results[gemm].emplace_back(result);
       }
     }
   }
@@ -205,7 +268,7 @@ void benchmark(GemmContext* context) {
   for (auto b : benchmark_results) {
     sort(b.second.begin(), b.second.end());
     std::cout << b.first.rows << "x" << b.first.depth << "x" << b.first.cols
-              << " : " << b.second.back() << " GFlops/s" << std::endl;
+              << " : " << b.second.back().second << " GFlops/s " << b.second.back().first << " ms " << std::endl;
   }
   std::cout << std::endl;
 }
@@ -227,7 +290,7 @@ void benchmark_gemm_sizes(GemmContext* context,
   double starttime = real_time_in_seconds();
   while (real_time_in_seconds() < starttime + mintime) {
     gemm_times.push_back(
-        time_for_gemms<LhsType, RhsType, ResultType>(context, gemms));
+        time_for_gemms<LhsType, RhsType, ResultType>(context, gemms, GemmMethod::MethodGemmlowp));
   }
 
 #ifdef GEMMLOWP_TEST_PROFILE
@@ -335,6 +398,7 @@ void benchmark_small_model(GemmContext* context) {
 }
 
 void benchmark_all() {
+#if 0  
   {
     gemmlowp::GemmContext context;
     std::cout << "Benchmarking small model GEMMs..." << std::endl;
@@ -346,19 +410,23 @@ void benchmark_all() {
     std::cout << "Benchmarking typical GoogLeNet GEMMs..." << std::endl;
     gemmlowp::benchmark_googlenet(&context);
   }
-
+#endif
   {
     gemmlowp::GemmContext context;
     context.set_max_num_threads(0);
-    std::cout << "Benchmarking multi-threaded mode..." << std::endl;
-    gemmlowp::benchmark(&context);
+    std::cout << "Benchmarking gemmlowp multi-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowp);
+    std::cout << "Benchmarking farm multi-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodFarm);
   }
 
   {
     gemmlowp::GemmContext context;
     context.set_max_num_threads(1);
-    std::cout << "Benchmarking single-threaded mode..." << std::endl;
-    gemmlowp::benchmark(&context);
+    std::cout << "Benchmarking gemmlowp single-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowp);
+    std::cout << "Benchmarking farm single-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodFarm);
   }
 }
 

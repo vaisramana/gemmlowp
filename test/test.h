@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "../public/gemmlowp.h"
+#include "../public/gemvlowp.h"
 
 namespace gemmlowp {
 
