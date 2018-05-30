@@ -55,7 +55,7 @@ namespace gemmlowp {
 const double min_accurate_duration = 1e-1;
 const std::size_t min_working_set_size = 16 * 1024 * 1024;
 
-enum class GemmMethod { MethodGemmlowp, MethodFarm };
+enum class GemmMethod { MethodGemmlowp, MethodGemmlowpFixedPoint, MethodFarm };
 
 struct gemm_t {
   int rows, depth, cols;
@@ -130,6 +130,20 @@ double time_for_gemms(GemmContext* context, const std::vector<gemm_t>& gemms, Ge
               context, lhs[k].const_map(), rhs[k].const_map(), &result[k].map(),
               -75, -91, 74980, 123, 20);
         }
+        else if (GemmMethod::MethodGemmlowpFixedPoint == method) {
+          gemmlowp::OutputStageQuantizeDownInt32ByFixedPoint quantize_down_stage;
+          quantize_down_stage.result_offset_after_shift = 74980;
+          quantize_down_stage.result_fixedpoint_multiplier = 123;
+          quantize_down_stage.result_shift = 20;
+          gemmlowp::OutputStageSaturatingCastToUint8 saturating_cast_stage;
+          const auto& output_pipeline =
+              std::make_tuple(quantize_down_stage, saturating_cast_stage);
+
+          gemmlowp::GemmWithOutputPipeline<std::uint8_t, std::uint8_t,
+                                      gemmlowp::DefaultL8R8BitDepthParams>(
+                                      context, lhs[k].const_map(), rhs[k].const_map(),
+                                      &result[k].map(), -75, -91, output_pipeline);
+        }
         else if (GemmMethod::MethodFarm == method) {
           Gemv<std::uint8_t, GEMMLOWP_TEST_BIT_DEPTH_PARAMS>(
               context, lhs[k].const_map(), rhs[k].const_map(), &result[k].map(),
@@ -179,6 +193,7 @@ void benchmark(GemmContext* context, GemmMethod method) {
   std::map<gemm_t, std::vector<std::pair<double, double> >> benchmark_results;
 
   std::vector<gemm_t> benchmark_gemms;
+  
   /*
   benchmark_gemms.emplace_back(6144, 1, 320),
   benchmark_gemms.emplace_back(6144, 2, 320),
@@ -190,7 +205,18 @@ void benchmark(GemmContext* context, GemmMethod method) {
   benchmark_gemms.emplace_back(6144, 8, 320),
   benchmark_gemms.emplace_back(6144, 9, 320),
   benchmark_gemms.emplace_back(6144, 10, 320),
+  benchmark_gemms.emplace_back(128, 1, 128);
+  benchmark_gemms.emplace_back(256, 1, 256);
+  benchmark_gemms.emplace_back(384, 1, 384);
+  benchmark_gemms.emplace_back(512, 1, 512);
+  benchmark_gemms.emplace_back(640, 1, 640);
+  benchmark_gemms.emplace_back(768, 1, 768);
+  benchmark_gemms.emplace_back(896, 1, 896);
+  benchmark_gemms.emplace_back(1024, 1, 1024);
+  benchmark_gemms.emplace_back(2048, 1, 2048);
+  benchmark_gemms.emplace_back(4096, 1, 4096);
   */
+
   benchmark_gemms.emplace_back(1, 6144, 320),
   benchmark_gemms.emplace_back(2, 6144, 320),
   benchmark_gemms.emplace_back(3, 6144, 320),
@@ -211,18 +237,28 @@ void benchmark(GemmContext* context, GemmMethod method) {
   benchmark_gemms.emplace_back(1, 1024, 1024);
   benchmark_gemms.emplace_back(1, 2048, 2048);
   benchmark_gemms.emplace_back(1, 4096, 4096);
-  /*
-  benchmark_gemms.emplace_back(128, 1, 128);
-  benchmark_gemms.emplace_back(256, 1, 256);
-  benchmark_gemms.emplace_back(384, 1, 384);
-  benchmark_gemms.emplace_back(512, 1, 512);
-  benchmark_gemms.emplace_back(640, 1, 640);
-  benchmark_gemms.emplace_back(768, 1, 768);
-  benchmark_gemms.emplace_back(896, 1, 896);
-  benchmark_gemms.emplace_back(1024, 1, 1024);
-  benchmark_gemms.emplace_back(2048, 1, 2048);
-  benchmark_gemms.emplace_back(4096, 1, 4096);
-  */
+
+  benchmark_gemms.emplace_back(320, 6144, 1),
+  benchmark_gemms.emplace_back(320, 6144, 2),
+  benchmark_gemms.emplace_back(320, 6144, 3),
+  benchmark_gemms.emplace_back(320, 6144, 4),
+  benchmark_gemms.emplace_back(320, 6144, 5),
+  benchmark_gemms.emplace_back(320, 6144, 6),
+  benchmark_gemms.emplace_back(320, 6144, 7),
+  benchmark_gemms.emplace_back(320, 6144, 8),
+  benchmark_gemms.emplace_back(320, 6144, 9),
+  benchmark_gemms.emplace_back(320, 6144, 10),
+  benchmark_gemms.emplace_back(128, 128, 1);
+  benchmark_gemms.emplace_back(256, 256, 1);
+  benchmark_gemms.emplace_back(384, 384, 1);
+  benchmark_gemms.emplace_back(512, 512, 1);
+  benchmark_gemms.emplace_back(640, 640, 1);
+  benchmark_gemms.emplace_back(768, 768, 1);
+  benchmark_gemms.emplace_back(896, 896, 1);
+  benchmark_gemms.emplace_back(1024, 1024, 1);
+  benchmark_gemms.emplace_back(2048, 2048, 1);
+  benchmark_gemms.emplace_back(4096, 4096, 1);
+
   //benchmark_gemms.emplace_back(1000, 1000, 1);
   //benchmark_gemms.emplace_back(1000, 1000, 10);
   //benchmark_gemms.emplace_back(1000, 1000, 100);
@@ -416,8 +452,11 @@ void benchmark_all() {
     context.set_max_num_threads(0);
     std::cout << "Benchmarking gemmlowp multi-threaded mode..." << std::endl;
     gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowp);
+    std::cout << "Benchmarking MethodGemmlowpFixedPoint multi-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowpFixedPoint);
     std::cout << "Benchmarking farm multi-threaded mode..." << std::endl;
     gemmlowp::benchmark(&context, GemmMethod::MethodFarm);
+    
   }
 
   {
@@ -425,6 +464,8 @@ void benchmark_all() {
     context.set_max_num_threads(1);
     std::cout << "Benchmarking gemmlowp single-threaded mode..." << std::endl;
     gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowp);
+    std::cout << "Benchmarking MethodGemmlowpFixedPoint single-threaded mode..." << std::endl;
+    gemmlowp::benchmark(&context, GemmMethod::MethodGemmlowpFixedPoint);
     std::cout << "Benchmarking farm single-threaded mode..." << std::endl;
     gemmlowp::benchmark(&context, GemmMethod::MethodFarm);
   }

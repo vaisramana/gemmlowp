@@ -6,6 +6,9 @@ c++ doc/quantization_example.cc -I . --std=c++11 -msse4.1 -lpthread \
   -o /tmp/quantization_example && \
 /tmp/quantization_example
 
+
+/home/shuo/shuo/bin/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-g++ doc/quantization_example.cc -I . --std=c++11 -lpthread  -o ./test/quantization
+
 */
 
 #include <algorithm>
@@ -15,7 +18,9 @@ c++ doc/quantization_example.cc -I . --std=c++11 -msse4.1 -lpthread \
 #include <iostream>
 #include <random>
 #include <vector>
+#include <time.h> 
 #include "../public/gemmlowp.h"
+#include "../public/gemvlowp.h"
 #include "../public/output_stages.h"
 
 // We will handle both float and quantized matrices, which we will
@@ -243,19 +248,19 @@ void QuantizeMultiplierSmallerThanOne(float real_multiplier,
 int main() {
   std::cout.precision(3);
 
-  const int rows = 2;
-  const int depth = 4;
-  const int cols = 3;
-  const auto kOrder = gemmlowp::MapOrder::ColMajor;
+  int rows = 8;
+  int depth = 64;
+  int cols = 64;
+  //const auto kOrder = gemmlowp::MapOrder::ColMajor;
 
   std::cout << "First, let us make some float matrices LHS and RHS, "
             << "and compute their product.\n"
             << std::endl;
-  MatrixWithStorage<float, kOrder> float_lhs(rows, depth);
+  MatrixWithStorage<float, gemmlowp::MapOrder::RowMajor> float_lhs(rows, depth);
   float_lhs.MakeRandom();
-  MatrixWithStorage<float, kOrder> float_rhs(depth, cols);
+  MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> float_rhs(depth, cols);
   float_rhs.MakeRandom();
-  MatrixWithStorage<float, kOrder> reference_float_result(rows, cols);
+  MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> reference_float_result(rows, cols);
   auto reference_float_result_map = reference_float_result.Map();
   FloatMatrixMultiplication(float_lhs.ConstMap(), float_rhs.ConstMap(),
                             &reference_float_result_map);
@@ -319,9 +324,12 @@ int main() {
 
   std::cout << std::endl;
 
-  MatrixWithStorage<std::uint8_t, kOrder> uint8_lhs(rows, depth);
-  MatrixWithStorage<std::uint8_t, kOrder> uint8_rhs(depth, cols);
-  MatrixWithStorage<std::uint8_t, kOrder> actual_uint8_result(rows, cols);
+ 
+  MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::RowMajor> uint8_lhs(rows, depth);
+  MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> uint8_rhs(depth, cols);
+  MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> actual_uint8_result(rows, cols);
+  MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> gemm_uint8_result(rows, cols);
+  MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> gemv_uint8_result(rows, cols);
 
   Quantize(lhs_qparams, float_lhs.Storage(), &uint8_lhs.Storage());
   Quantize(rhs_qparams, float_rhs.Storage(), &uint8_rhs.Storage());
@@ -340,6 +348,10 @@ int main() {
   QuantizeMultiplierSmallerThanOne(real_multiplier, &quantized_multiplier,
                                    &right_shift);
 
+  std::cout << "Quantized float multiplier:" << real_multiplier 
+            << " int32 multiplier:" << quantized_multiplier 
+            << " right_shift:" << right_shift << std::endl;
+
   std::cout << "End of OFFLINE QUANTIZATION CODE.\n" << std::endl;
 
   std::cout << "The below is ON-DEVICE RUNTIME QUANTIZED CODE. "
@@ -356,7 +368,10 @@ int main() {
   const auto& output_pipeline =
       std::make_tuple(quantize_down_stage, saturating_cast_stage);
 
+
   auto actual_uint8_result_map = actual_uint8_result.Map();
+  auto gemm_uint8_result_map = gemm_uint8_result.Map();
+  auto gemv_uint8_result_map = gemv_uint8_result.Map();
   gemmlowp::GemmContext gemm_context;
   gemmlowp::GemmWithOutputPipeline<std::uint8_t, std::uint8_t,
                                    gemmlowp::DefaultL8R8BitDepthParams>(
@@ -366,10 +381,58 @@ int main() {
   std::cout << "Quantized uint8 result matrix obtained by quantized "
             << "multiplication:\n"
             << actual_uint8_result << std::endl;
+  
+
+#if 0
+  gemmlowp::Gemm<std::uint8_t, gemmlowp::DefaultL8R8BitDepthParams>(
+          &gemm_context, uint8_lhs.ConstMap(), uint8_rhs.ConstMap(),
+          &gemm_uint8_result_map, lhs_offset, rhs_offset, 
+          result_offset, 
+          quantized_multiplier, 
+          right_shift);  
+  std::cout << "GEMM uint8 result matrix obtained by quantized "
+            << "multiplication:\n"
+            << gemm_uint8_result << std::endl;
+
+#else
+  gemmlowp::Gemv<std::uint8_t, gemmlowp::DefaultL8R8BitDepthParams>(
+          &gemm_context, uint8_lhs.ConstMap(), uint8_rhs.ConstMap(),
+          &gemv_uint8_result_map, lhs_offset, rhs_offset, 
+          result_offset, 
+          quantized_multiplier, 
+          right_shift);  
+  std::cout << "Gemv uint8 result matrix obtained by quantized "
+            << "multiplication:\n"
+            << gemv_uint8_result << std::endl;
+#endif
+
+  // Calculate result_uint8 as the correct gemm output
+  for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < cols; j++) {
+          int temp = 0;
+          for (int t = 0; t < depth; t++) {
+              temp += (static_cast<int32_t>((uint8_lhs.Map())(i, t)) + lhs_offset) * 
+                      (static_cast<int32_t>((uint8_rhs.Map())(t, j)) + rhs_offset);
+          }  
+          double mul = static_cast<double>(quantized_multiplier)/(1ll<<31);        
+          double res = static_cast<double>(temp * mul) / 
+                        static_cast<double>(pow(2.0, right_shift)) + result_offset;
+          //printf("(%dx%d(%lf))>>%d+%d = %lf\n", temp, quantized_multiplier, mul, right_shift, result_offset, res);             
+          /*
+          if (res < 0.0) {
+              res = 0;
+          } else if (res > 255.0) {
+              res = 255;
+          } else {
+              res = static_cast<std::uint8_t>(std::round(res));
+          }
+          */
+      }
+  }
 
   std::cout << "End of ON-DEVICE RUNTIME QUANTIZED CODE.\n" << std::endl;
 
-  MatrixWithStorage<float, kOrder> actual_float_result(rows, cols);
+  MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> actual_float_result(rows, cols);
   Dequantize(result_qparams, actual_uint8_result.Storage(),
              &actual_float_result.Storage());
   std::cout
@@ -378,14 +441,122 @@ int main() {
       << "as far as we are concerned, the ACTUAL RESULT:\n"
       << actual_float_result << std::endl;
 
-  MatrixWithStorage<float, kOrder> diff_float_result(rows, cols);
+  MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> diff_float_result(rows, cols);
+  MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> diff_percentage_result(rows, cols);
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
       diff_float_result.Map()(i, j) =
           actual_float_result.Map()(i, j) - reference_float_result.Map()(i, j);
+      if(0 == reference_float_result.Map()(i, j))
+      {
+        diff_percentage_result.Map()(i, j) = 
+          abs(diff_float_result.Map()(i, j)/actual_float_result.Map()(i, j))*100;
+      }
+      else
+      {
+        diff_percentage_result.Map()(i, j) = 
+            abs(diff_float_result.Map()(i, j)/reference_float_result.Map()(i, j))*100;
+      }
     }
   }
 
   std::cout << "Difference between ACTUAL and REFERENCE float results:\n"
             << diff_float_result << std::endl;
+
+  std::cout << "Difference % between ACTUAL and REFERENCE float results:\n"
+            << diff_percentage_result << std::endl;
+
+
+  srand((unsigned)time(NULL));
+  #define LOOP_NUMBER (100)
+  for(int i=0; i<LOOP_NUMBER; i++)
+  {
+      
+      int random = rand()%100;
+      rows = random;
+      depth = 8*random;
+      cols = 8*random;
+
+      MatrixWithStorage<float, gemmlowp::MapOrder::RowMajor> float_lhs_test(rows, depth);
+      float_lhs_test.MakeRandom();
+      MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> float_rhs_test(depth, cols);
+      float_rhs_test.MakeRandom();
+      MatrixWithStorage<float, gemmlowp::MapOrder::ColMajor> reference_float_result_test(rows, cols);
+      auto reference_float_result_map_test = reference_float_result_test.Map();
+      FloatMatrixMultiplication(float_lhs_test.ConstMap(), float_rhs_test.ConstMap(),
+                                &reference_float_result_map_test);
+      //float lhs_min, lhs_max, rhs_min, rhs_max, result_min, result_max;
+      FindMinMax(float_lhs_test.Map(), &lhs_min, &lhs_max);
+      FindMinMax(float_rhs_test.Map(), &rhs_min, &rhs_max);
+      FindMinMax(reference_float_result_test.Map(), &result_min, &result_max);
+      const auto lhs_qparams_test = ChooseQuantizationParams(lhs_min, lhs_max);
+      const auto rhs_qparams_test = ChooseQuantizationParams(rhs_min, rhs_max);
+      const auto result_qparams_test = ChooseQuantizationParams(result_min, result_max);
+      
+      MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::RowMajor> uint8_lhs_test(rows, depth);
+      MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> uint8_rhs_test(depth, cols);
+      MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> actual_uint8_result_test(rows, cols);
+      MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> gemm_uint8_result_test(rows, cols);
+      MatrixWithStorage<std::uint8_t, gemmlowp::MapOrder::ColMajor> gemv_uint8_result_test(rows, cols);
+      
+      Quantize(lhs_qparams_test, float_lhs_test.Storage(), &uint8_lhs_test.Storage());
+      Quantize(rhs_qparams_test, float_rhs_test.Storage(), &uint8_rhs_test.Storage());
+      
+      const int lhs_offset_test = -lhs_qparams_test.zero_point;
+      const int rhs_offset_test = -rhs_qparams_test.zero_point;
+      const int result_offset_test = result_qparams_test.zero_point;
+
+      const float real_multiplier_test =
+          lhs_qparams_test.scale * rhs_qparams_test.scale / result_qparams_test.scale;
+      //std::int32_t quantized_multiplier;
+      //int right_shift;
+      QuantizeMultiplierSmallerThanOne(real_multiplier_test, &quantized_multiplier,
+                                      &right_shift);  
+      
+      //gemmlowp::OutputStageQuantizeDownInt32ByFixedPoint
+      //    quantize_down_stage;
+      quantize_down_stage.result_offset_after_shift = result_offset_test;
+      quantize_down_stage.result_fixedpoint_multiplier = quantized_multiplier;
+      quantize_down_stage.result_shift = right_shift;
+      gemmlowp::OutputStageSaturatingCastToUint8 saturating_cast_stage;
+      const auto& output_pipeline =
+          std::make_tuple(quantize_down_stage, saturating_cast_stage);
+
+
+      auto actual_uint8_result_map_test = actual_uint8_result_test.Map();
+      auto gemm_uint8_result_map_test = gemm_uint8_result_test.Map();
+      auto gemv_uint8_result_map_test = gemv_uint8_result_test.Map();
+      gemmlowp::GemmContext gemm_context;
+      gemmlowp::GemmWithOutputPipeline<std::uint8_t, std::uint8_t,
+                                      gemmlowp::DefaultL8R8BitDepthParams>(
+          &gemm_context, uint8_lhs_test.ConstMap(), uint8_rhs_test.ConstMap(),
+          &actual_uint8_result_map_test, lhs_offset_test, rhs_offset_test, output_pipeline);  
+      
+      gemmlowp::Gemv<std::uint8_t, gemmlowp::DefaultL8R8BitDepthParams>(
+              &gemm_context, uint8_lhs_test.ConstMap(), uint8_rhs_test.ConstMap(),
+              &gemv_uint8_result_map_test, lhs_offset_test, rhs_offset_test, 
+              result_offset_test, 
+              quantized_multiplier, 
+              right_shift);  
+
+
+      std::uint8_t * ptr1 = actual_uint8_result_test.Storage().data();
+      std::uint8_t * ptr2 = gemv_uint8_result_test.Storage().data();
+
+      for(int j=0; j<rows*cols; j++)
+      {
+          if(ptr1[j] != ptr2[j])
+          {
+            printf("%d failure\n", j);
+            return -1;
+          }  
+      }
+
+      std::cout << "test loop " << i + 1 << ".../" << LOOP_NUMBER << " size lhs" 
+                << rows << "x" << depth << " x rhs" << depth << "x" << cols << " verification ok......\r" 
+                << std::flush;
+
+  }
+  printf("test done\n");
+  
 }

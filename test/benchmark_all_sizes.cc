@@ -94,6 +94,16 @@ class Matrix : public MatrixMap<tScalar, tOrder> {
 
   ConstMap const_map() const { return ConstMap(data_, rows_, cols_, stride_); }
 
+  void print() {
+      for(int i=0; i<rows_; i++) {
+          for(int j=0; j<cols_; j++) {
+              printf("%d ", data_[i*cols_+j]);
+          }
+          printf("\n");
+      }
+  }
+
+
  protected:
   std::vector<Scalar> storage;
 };
@@ -346,6 +356,111 @@ void run_benchmarks(std::map<Shape, float>* results) {
   }
   fprintf(stderr, "\n");
 }
+
+
+
+void TestWithData() {
+  const int m = 1;
+  const int n = 8;
+  const int k = 8;
+  //typedef farm::MapOrder Order;
+  // Vector A (LHS) is:
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  std::uint8_t a_data[] = {1, 2, 3, 4, 5, 6, 7, 8};
+  //std::uint8_t a_data[] = {1, 2, 3};
+  //std::uint8_t a_data[] = {1, 1, 1, 1, 1, 1, 1, 1};
+  // Matrix B (RHS) is:
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  // |  1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+  std::uint8_t b_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8,
+                            1, 2, 3, 4, 5, 6, 7, 8};
+  //std::uint8_t b_data[] = { 1, 2,  
+  //                          1, 2, 
+  //                          1, 2};
+  // Here are the results we expect, from hand calculations:
+  // (1 * 7) + (3 * 8) + (5 * 9) = 76
+  // (2 * 7) + (4 * 8) + (6 * 9) = 100
+  // (1 * 10) + (3 * 11) + (5 * 12) = 103
+  // (2 * 10) + (4 * 11) + (6 * 12) = 136
+  // (1 * 13) + (3 * 14) + (5 * 15) = 130
+  // (2 * 13) + (4 * 14) + (6 * 15) = 172
+  // (1 * 16) + (3 * 17) + (5 * 18) = 157
+  // (2 * 16) + (4 * 17) + (6 * 18) = 208
+  // That means matrix C should be:
+  // |  76 | 103 | 130 | 157 |
+  // | 100 | 136 | 172 | 208 |
+  //const std::uint8_t expected_data[] = {76, 100, 103, 136, 130, 172, 157, 208};
+
+  const int c_count = m * n;
+  std::uint8_t output_data[m*n];
+
+  const bool is_a_transposed = true;
+  const bool is_b_transposed = true;
+  const bool is_c_transposed = true;
+  const int lda = k;
+  const int ldb = n;
+  const int ldc = n;
+
+  const int a_offset = -2;
+  const int b_offset = -4;
+  const int c_offset = 0;
+  const int c_mult = 1;
+  const int c_shift = 0;
+
+#if 0
+  gemmlowp::eight_bit_int_gemm::EightBitIntGemm(
+      is_a_transposed, is_b_transposed, is_c_transposed, m, n, k, a_data,
+      a_offset, lda, b_data, b_offset, ldb, output_data.get(), c_offset, c_mult,
+      c_shift, ldc, eight_bit_int_gemm::BitDepthSetting::A8B8);
+#endif
+
+
+
+  gemmlowp::MatrixMap<std::uint8_t, gemmlowp::MapOrder::RowMajor> lhs(a_data, m, k);
+  gemmlowp::MatrixMap<std::uint8_t, gemmlowp::MapOrder::ColMajor> rhs(b_data, k, n);
+  // result_gemm is the gemm output of the farm library.
+  gemmlowp::MatrixMap<std::uint8_t, gemmlowp::MapOrder::ColMajor> result_gemm(output_data, m, n);
+  // result_uint8 is the correct gemm output calculated using for loop.
+  //gemmlowp::MatrixMap<std::uint8_t, gemmlowp::MapOrder::ColMajor> result_uint8(m, n);
+
+  //farm::MakeRandom<typename farm::OperandRange<0, 255>>(&lhs);
+  //farm::MakeRandom<typename farm::OperandRange<0, 255>>(&rhs);
+  
+  GemmContext gemm_context;
+  gemmlowp::Gemm<std::uint8_t, L8R8WithLhsNonzeroBitDepthParams>(gemm_context,
+        lhs,
+        rhs,
+        &result_gemm,
+        a_offset,
+        b_offset,
+        c_offset,
+        c_mult,
+        c_shift);
+  
+
+  printf("lhs\n");
+  lhs.print();
+  printf("rhs\n");
+  rhs.print();
+  printf("result_gemm\n");
+  result_gemm.print();
+}
+
+
+
+
 
 int main() {
   std::map<Shape, float> results;

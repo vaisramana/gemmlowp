@@ -10,6 +10,7 @@ namespace gemmlowp {
 
 #define NEW_QUANTIZE_METHOD
 
+
 void gemm_1_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
                        std::uint8_t* dst_ptr, std::size_t run_depth, 
                        std::int16_t* lhs_offset, std::int16_t* rhs_offset, 
@@ -284,19 +285,34 @@ void gemm_1_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "addv s23, v23.4s\n"
         "mov v18.s[3], v21.s[0]\n"
         "addv s24, v24.4s\n"
-#ifdef NEW_QUANTIZE_METHOD        
+
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v18.4s, v18.4s, v1.4s\n"
         "addv s25, v25.4s\n"
         "mov v22.s[1], v23.s[0]\n"
         "mov x0, %[dst_ptr]\n"
         "mov v22.s[2], v24.s[0]\n"
-        "add v18.4s, v18.4s, v0.4s\n"
         "mov v22.s[3], v25.s[0]\n"
         "and v3.16b, v18.16b, v2.16b\n"
         "sqrdmulh v22.4s, v22.4s, v1.4s\n"
         "sshr v3.4s, v3.4s, #31\n"
-        "add v22.4s, v22.4s, v0.4s\n"
-#else
+        "sqadd v18.4s, v18.4s, v3.4s\n"
+        "and v4.16b, v22.16b, v2.16b\n"
+        "srshl v18.4s, v18.4s, v2.4s\n"
+        "sqadd v18.4s, v18.4s, v0.4s\n"
+        "sshr v4.4s, v4.4s, #31\n"
+        "sqxtn v3.4h, v18.4s\n"
+        "sqadd v22.4s, v22.4s, v4.4s\n"
+        "mov v18.d[0], v3.d[0]\n"
+        "mov v18.d[1], v3.d[0]\n"
+        "srshl v22.4s, v22.4s, v2.4s\n"
+        "sqadd v22.4s, v22.4s, v0.4s\n"
+        "sqxtun v18.8b, v18.8h\n"
+        "sqxtn v4.4h, v22.4s\n"
+        "mov v22.d[0], v4.d[0]\n"
+        "mov v22.d[1], v4.d[0]\n"
+        "sqxtun v22.8b, v22.8h\n" 
+#else        
         "add v18.4s, v18.4s, v0.4s\n"
         "addv s25, v25.4s\n"
         "mov v22.s[1], v23.s[0]\n"
@@ -308,7 +324,6 @@ void gemm_1_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "add v22.4s, v22.4s, v0.4s\n"
         "sshr v3.4s, v3.4s, #31\n"
         "mul v22.4s, v22.4s, v1.4s\n"
-#endif
         "sqadd v18.4s, v18.4s, v3.4s\n"
         "and v4.16b, v22.16b, v2.16b\n"
         "srshl v18.4s, v18.4s, v2.4s\n"
@@ -323,7 +338,7 @@ void gemm_1_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v22.d[0], v4.d[0]\n"
         "mov v22.d[1], v4.d[0]\n"
         "sqxtun v22.8b, v22.8h\n" 
-
+#endif
         // Store accumulators
         "st1 {v18.s}[0], [x0], #4\n"
         "st1 {v22.s}[0], [x0]\n"
@@ -565,18 +580,37 @@ void gemm_2_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "addv s15, v15.4s\n"
         "mov v10.s[3], v13.s[0]\n"
         "addv s16, v16.4s\n"
+
 #ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v10.4s, v10.4s, v1.4s\n"
         "addv s17, v17.4s\n"
         "mov v14.s[1], v15.s[0]\n"
         "mov x0, %[dst_ptr]\n"
         "mov v14.s[2], v16.s[0]\n"     
-        "add v10.4s, v10.4s, v0.4s\n"
         "mov v14.s[3], v17.s[0]\n" 
         "and v3.16b, v10.16b, v2.16b\n"
         "sqrdmulh v14.4s, v14.4s, v1.4s\n"
         "sshr v3.4s, v3.4s, #31\n"
-        "add v14.4s, v14.4s, v0.4s\n"
+        "sqadd v10.4s, v10.4s, v3.4s\n"
+        "and v4.16b, v14.16b, v2.16b\n"
+        "srshl v10.4s, v10.4s, v2.4s\n"
+        "sqadd v10.4s, v10.4s, v0.4s\n"
+        "sshr v4.4s, v4.4s, #31\n"
+        "sqxtn v3.4h, v10.4s\n"
+        "sqadd v14.4s, v14.4s, v4.4s\n"
+        "mov v10.d[0], v3.d[0]\n"
+        "mov v10.d[1], v3.d[0]\n"
+        "srshl v14.4s, v14.4s, v2.4s\n"
+        "sqadd v14.4s, v14.4s, v0.4s\n"
+        "sqxtun v10.8b, v10.8h\n"
+        "sqxtn v4.4h, v14.4s\n"
+        "mov x1, x0\n"
+        "mov v14.d[0], v4.d[0]\n"
+        "mov v14.d[1], v4.d[0]\n"
+        "sqxtun v14.8b, v14.8h\n"
+        "st1 {v10.s}[0], [x0], #4\n"
+        "add x1, x1, %[rows]\n"
+        "st1 {v14.s}[0], [x0]\n"
 #else
         "add v10.4s, v10.4s, v0.4s\n"
         "addv s17, v17.4s\n"
@@ -589,7 +623,6 @@ void gemm_2_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "add v14.4s, v14.4s, v0.4s\n"
         "sshr v3.4s, v3.4s, #31\n"
         "mul v14.4s, v14.4s, v1.4s\n"
-#endif
         "sqadd v10.4s, v10.4s, v3.4s\n"
         "and v4.16b, v14.16b, v2.16b\n"
         "srshl v10.4s, v10.4s, v2.4s\n"
@@ -608,6 +641,7 @@ void gemm_2_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "st1 {v10.s}[0], [x0], #4\n"
         "add x1, x1, %[rows]\n"
         "st1 {v14.s}[0], [x0]\n"
+#endif
 
         "addv s18, v18.4s\n"
         "addv s19, v19.4s\n"
@@ -623,17 +657,35 @@ void gemm_2_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v22.s[1], v23.s[0]\n"
         "mov v22.s[2], v24.s[0]\n"
         "mov v22.s[3], v25.s[0]\n"
+
 #ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v18.4s, v18.4s, v1.4s\n"
         "sqrdmulh v22.4s, v22.4s, v1.4s\n"
-        "add v18.4s, v18.4s, v0.4s\n"
-        "add v22.4s, v22.4s, v0.4s\n"
+        "and v3.16b, v18.16b, v2.16b\n"
+        "and v4.16b, v22.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sshr v4.4s, v4.4s, #31\n"
+        "sqadd v18.4s, v18.4s, v3.4s\n"
+        "sqadd v22.4s, v22.4s, v4.4s\n"
+        "srshl v18.4s, v18.4s, v2.4s\n"
+        "srshl v22.4s, v22.4s, v2.4s\n"
+        "sqadd v18.4s, v18.4s, v0.4s\n"
+        "sqadd v22.4s, v22.4s, v0.4s\n"
+        "sqxtn v3.4h, v18.4s\n"
+        "sqxtn v4.4h, v22.4s\n"
+        "mov v18.d[0], v3.d[0]\n"
+        "mov v18.d[1], v3.d[0]\n"
+        "mov v22.d[0], v4.d[0]\n"
+        "mov v22.d[1], v4.d[0]\n"
+        "sqxtun v18.8b, v18.8h\n"
+        "sqxtun v22.8b, v22.8h\n"
+        "st1 {v18.s}[0], [x1], #4\n"
+        "st1 {v22.s}[0], [x1]\n"
 #else
         "add v18.4s, v18.4s, v0.4s\n"
         "add v22.4s, v22.4s, v0.4s\n"
         "mul v18.4s, v18.4s, v1.4s\n"
         "mul v22.4s, v22.4s, v1.4s\n"
-#endif        
         "and v3.16b, v18.16b, v2.16b\n"
         "and v4.16b, v22.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
@@ -652,6 +704,8 @@ void gemm_2_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v22.8b, v22.8h\n"
         "st1 {v18.s}[0], [x1], #4\n"
         "st1 {v22.s}[0], [x1]\n"
+#endif
+
 #undef FARM_LABEL_LOOP
 #undef FARM_LABEL_AFTER_LOOP
         : // outputs
@@ -953,13 +1007,22 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v14.s[1], v15.s[0]\n"
         "mov v14.s[2], v16.s[0]\n"
         "mov v14.s[3], v17.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD 
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v14.4s, v14.4s, v1.4s\n"
-        "add v14.4s, v14.4s, v0.4s\n"
+        "and v3.16b, v14.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v14.4s, v14.4s, v3.4s\n"
+        "srshl v14.4s, v14.4s, v2.4s\n"
+        "sqadd v14.4s, v14.4s, v0.4s\n"
+        "sqxtn v3.4h, v14.4s\n"
+        "mov v14.d[0], v3.d[0]\n"
+        "mov v14.d[1], v3.d[0]\n"
+        "sqxtun v14.8b, v14.8h\n"
+        "st1 {v14.s}[0], [%[dst_ptr]]\n"
+        "add %[dst_ptr], %[dst_ptr], %[rows]\n"
 #else
         "add v14.4s, v14.4s, v0.4s\n"
         "mul v14.4s, v14.4s, v1.4s\n"
-#endif     
         "and v3.16b, v14.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v14.4s, v14.4s, v3.4s\n"
@@ -970,7 +1033,7 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v14.8b, v14.8h\n"
         "st1 {v14.s}[0], [%[dst_ptr]]\n"
         "add %[dst_ptr], %[dst_ptr], %[rows]\n"
-
+#endif
         // Second column
         "addv s18, v18.4s\n"
         "addv s19, v19.4s\n"
@@ -979,13 +1042,22 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v18.s[1], v19.s[0]\n"
         "mov v18.s[2], v20.s[0]\n"
         "mov v18.s[3], v21.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD 
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v18.4s, v18.4s, v1.4s\n"
-        "add v18.4s, v18.4s, v0.4s\n"
-#else        
+        "and v3.16b, v18.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v18.4s, v18.4s, v3.4s\n"
+        "srshl v18.4s, v18.4s, v2.4s\n"
+        "sqadd v18.4s, v18.4s, v0.4s\n"
+        "sqxtn v3.4h, v18.4s\n"
+        "mov v18.d[0], v3.d[0]\n"
+        "mov v18.d[1], v3.d[0]\n"
+        "sqxtun v18.8b, v18.8h\n"
+        "st1 {v18.s}[0], [%[dst_ptr]]\n"
+        "add %[dst_ptr], %[dst_ptr], %[rows]\n"
+#else
         "add v18.4s, v18.4s, v0.4s\n"
         "mul v18.4s, v18.4s, v1.4s\n"
-#endif     
         "and v3.16b, v18.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v18.4s, v18.4s, v3.4s\n"
@@ -996,7 +1068,7 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v18.8b, v18.8h\n"
         "st1 {v18.s}[0], [%[dst_ptr]]\n"
         "add %[dst_ptr], %[dst_ptr], %[rows]\n"
-
+#endif
         // Third column
         "addv s22, v22.4s\n"
         "addv s23, v23.4s\n"
@@ -1005,13 +1077,21 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v22.s[1], v23.s[0]\n"
         "mov v22.s[2], v24.s[0]\n"
         "mov v22.s[3], v25.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD 
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v22.4s, v22.4s, v1.4s\n"
-        "add v22.4s, v22.4s, v0.4s\n"
-#else 
+        "and v3.16b, v22.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v22.4s, v22.4s, v3.4s\n"
+        "srshl v22.4s, v22.4s, v2.4s\n"
+        "sqadd v22.4s, v22.4s, v0.4s\n"
+        "sqxtn v3.4h, v22.4s\n"
+        "mov v22.d[0], v3.d[0]\n"
+        "mov v22.d[1], v3.d[0]\n"
+        "sqxtun v22.8b, v22.8h\n"
+        "st1 {v22.s}[0], [%[dst_ptr]]\n"
+#else
         "add v22.4s, v22.4s, v0.4s\n"
         "mul v22.4s, v22.4s, v1.4s\n"
-#endif      
         "and v3.16b, v22.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v22.4s, v22.4s, v3.4s\n"
@@ -1021,6 +1101,7 @@ void gemm_3_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v22.d[1], v3.d[0]\n"
         "sqxtun v22.8b, v22.8h\n"
         "st1 {v22.s}[0], [%[dst_ptr]]\n"
+#endif
 #undef FARM_LABEL_LOOP
 #undef FARM_LABEL_AFTER_LOOP
         : // outputs
@@ -1238,13 +1319,23 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v8.s[1], v9.s[0]\n"    
         "mov v8.s[2], v10.s[0]\n"
         "mov v8.s[3], v11.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD        
+
+#ifdef NEW_QUANTIZE_METHOD 
         "sqrdmulh v8.4s, v8.4s, v1.4s\n"
-        "add v8.4s, v8.4s, v0.4s\n"
+        "and v3.16b, v8.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v8.4s, v8.4s, v3.4s\n"
+        "srshl v8.4s, v8.4s, v2.4s\n"
+        "sqadd v8.4s, v8.4s, v0.4s\n"
+        "sqxtn v3.4h, v8.4s\n"
+        "mov v8.d[0], v3.d[0]\n"
+        "mov v8.d[1], v3.d[0]\n"
+        "sqxtun v8.8b, v8.8h\n"
+        "st1 {v8.s}[0], [%[dst_ptr]]\n"
+        "add %[dst_ptr], %[dst_ptr], %[rows]\n"
 #else
         "add v8.4s, v8.4s, v0.4s\n"
         "mul v8.4s, v8.4s, v1.4s\n"
-#endif     
         "and v3.16b, v8.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v8.4s, v8.4s, v3.4s\n"
@@ -1255,6 +1346,7 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v8.8b, v8.8h\n"
         "st1 {v8.s}[0], [%[dst_ptr]]\n"
         "add %[dst_ptr], %[dst_ptr], %[rows]\n"
+#endif
 
         "addv s12, v12.4s\n"
         "addv s13, v13.4s\n"
@@ -1263,13 +1355,23 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v12.s[1], v13.s[0]\n"
         "mov v12.s[2], v14.s[0]\n"
         "mov v12.s[3], v15.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD        
+
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v12.4s, v12.4s, v1.4s\n"
-        "add v12.4s, v12.4s, v0.4s\n"
+        "and v3.16b, v12.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v12.4s, v12.4s, v3.4s\n"
+        "srshl v12.4s, v12.4s, v2.4s\n"
+        "sqadd v12.4s, v12.4s, v0.4s\n"
+        "sqxtn v3.4h, v12.4s\n"
+        "mov v12.d[0], v3.d[0]\n"
+        "mov v12.d[1], v3.d[0]\n"
+        "sqxtun v12.8b, v12.8h\n"
+        "st1 {v12.s}[0], [%[dst_ptr]]\n"
+        "add %[dst_ptr], %[dst_ptr], %[rows]\n"
 #else
         "add v12.4s, v12.4s, v0.4s\n"
         "mul v12.4s, v12.4s, v1.4s\n"
-#endif     
         "and v3.16b, v12.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v12.4s, v12.4s, v3.4s\n"
@@ -1280,7 +1382,7 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v12.8b, v12.8h\n"
         "st1 {v12.s}[0], [%[dst_ptr]]\n"
         "add %[dst_ptr], %[dst_ptr], %[rows]\n"
-
+#endif
         "addv s16, v16.4s\n"
         "addv s17, v17.4s\n"
         "addv s18, v18.4s\n"
@@ -1288,13 +1390,23 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v16.s[1], v17.s[0]\n"
         "mov v16.s[2], v18.s[0]\n"
         "mov v16.s[3], v19.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD        
+
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v16.4s, v16.4s, v1.4s\n"
-        "add v16.4s, v16.4s, v0.4s\n"
-#else        
+        "and v3.16b, v16.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v16.4s, v16.4s, v3.4s\n"
+        "srshl v16.4s, v16.4s, v2.4s\n"
+        "sqadd v16.4s, v16.4s, v0.4s\n"
+        "sqxtn v3.4h, v16.4s\n"
+        "mov v16.d[0], v3.d[0]\n"
+        "mov v16.d[1], v3.d[0]\n"
+        "sqxtun v16.8b, v16.8h\n"
+        "st1 {v16.s}[0], [%[dst_ptr]]\n"
+        "add %[dst_ptr], %[dst_ptr], %[rows]\n"
+#else
         "add v16.4s, v16.4s, v0.4s\n"
         "mul v16.4s, v16.4s, v1.4s\n"
-#endif
         "and v3.16b, v16.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v16.4s, v16.4s, v3.4s\n"
@@ -1305,6 +1417,7 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "sqxtun v16.8b, v16.8h\n"
         "st1 {v16.s}[0], [%[dst_ptr]]\n"
         "add %[dst_ptr], %[dst_ptr], %[rows]\n"
+#endif
 
         "addv s20, v20.4s\n"
         "addv s21, v21.4s\n"
@@ -1313,13 +1426,22 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v20.s[1], v21.s[0]\n"
         "mov v20.s[2], v22.s[0]\n"
         "mov v20.s[3], v23.s[0]\n"
-#ifdef NEW_QUANTIZE_METHOD        
+
+#ifdef NEW_QUANTIZE_METHOD
         "sqrdmulh v20.4s, v20.4s, v1.4s\n"
-        "add v20.4s, v20.4s, v0.4s\n"
-#else        
+        "and v3.16b, v20.16b, v2.16b\n"
+        "sshr v3.4s, v3.4s, #31\n"
+        "sqadd v20.4s, v20.4s, v3.4s\n"
+        "srshl v20.4s, v20.4s, v2.4s\n"
+        "sqadd v20.4s, v20.4s, v0.4s\n"
+        "sqxtn v3.4h, v20.4s\n"
+        "mov v20.d[0], v3.d[0]\n"
+        "mov v20.d[1], v3.d[0]\n"
+        "sqxtun v20.8b, v20.8h\n"
+        "st1 {v20.s}[0], [%[dst_ptr]]\n" 
+#else
         "add v20.4s, v20.4s, v0.4s\n"
         "mul v20.4s, v20.4s, v1.4s\n"
-#endif     
         "and v3.16b, v20.16b, v2.16b\n"
         "sshr v3.4s, v3.4s, #31\n"
         "sqadd v20.4s, v20.4s, v3.4s\n"
@@ -1328,7 +1450,8 @@ void gemm_4_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v20.d[0], v3.d[0]\n"
         "mov v20.d[1], v3.d[0]\n"
         "sqxtun v20.8b, v20.8h\n"
-        "st1 {v20.s}[0], [%[dst_ptr]]\n"       
+        "st1 {v20.s}[0], [%[dst_ptr]]\n"  
+#endif     
 #undef FARM_LABEL_LOOP
 #undef FARM_LABEL_AFTER_LOOP
         : // outputs
@@ -1400,14 +1523,22 @@ void gevv_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "dup v5.4s, %w[res_shift]\n"
         "smlal2 v2.4s, v0.8h, v1.8h\n"
 
-        "addv s2, v2.4s\n"
-#ifdef NEW_QUANTIZE_METHOD        
+#ifdef NEW_QUANTIZE_METHOD
+        "addv s2, v2.4s\n"       
         "sqrdmulh v2.4s, v2.4s, v4.4s\n"
-        "add v2.4s, v2.4s, v3.4s\n"
-#else
+        "and v0.16b, v2.16b, v5.16b\n"
+        "sshr v0.4s, v0.4s, #31\n"
+        "sqadd v2.4s, v2.4s, v0.4s\n"
+        "srshl v2.4s, v2.4s, v5.4s\n"
+        "sqadd v2.4s, v2.4s, v3.4s\n"
+        "sqxtn v0.4h, v2.4s\n"
+        "mov v2.d[0], v0.d[0]\n"
+        "mov v2.d[1], v0.d[0]\n"
+        "sqxtun v2.8b, v2.8h\n"
+#else 
+        "addv s2, v2.4s\n"
         "add v2.4s, v2.4s, v3.4s\n"
         "mul v2.4s, v2.4s, v4.4s\n"
-#endif        
         "and v0.16b, v2.16b, v5.16b\n"
         "sshr v0.4s, v0.4s, #31\n"
         "sqadd v2.4s, v2.4s, v0.4s\n"
@@ -1416,6 +1547,7 @@ void gevv_kernel_run(const std::uint8_t* lhs_ptr, const std::uint8_t* rhs_ptr,
         "mov v2.d[0], v0.d[0]\n"
         "mov v2.d[1], v0.d[0]\n"
         "sqxtun v2.8b, v2.8h\n"
+#endif
 
         // Store accumulators
         "st1 {v2.b}[0], [%[dst_ptr]]\n"
